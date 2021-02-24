@@ -42,8 +42,9 @@ int state = 0; //easy var call for wait function
 int active_procs = 0; // number of processes currently running
 int user_max_procs;
 int user_max_time;
-/*Shared Memory Variables */
+char* data;
 
+/*Shared Memory Variables */
 int shared_sum_key;
 int shared_sum_id;
 int *shared_sum;
@@ -68,6 +69,10 @@ int turn_key;
 int turn_id;
 int *turn;
 
+int proc_num_key;
+int proc_num_id;
+int *proc_num;
+
 int main (int argc, char* argv[])
 {
 	signal(SIGINT, c_sig_handler);
@@ -75,7 +80,7 @@ int main (int argc, char* argv[])
 	
 	//int user_max_procs = 20;
 	_program_name = argv[0];
-	const char* file_out = "log.out"; // shared output file for the program
+	const char* file_out = "output"; // shared output file for the program
 
 	/*Shared Memory Variables */
 	
@@ -97,6 +102,9 @@ int main (int argc, char* argv[])
 	//Shared memory vars for turn token
 	turn_key = ftok("makefile", 6);
 	
+	//Shared memory for number of processes in system
+	proc_num_key = ftok("makefile", 7);
+	
 	user_max_procs = -1;
 	user_max_time = -1;
 	//int shm_id; // stores shared memory ID
@@ -107,7 +115,7 @@ int main (int argc, char* argv[])
 	_program_name = argv[0];
 	snprintf(_error_str, sizeof _error_str, "%s: Error", _program_name); // for perror
 
-	int i = 0; // initialize an iterator
+	int i; // initialize an iterator
 	
 	if (argc == 1)
 	{
@@ -146,12 +154,26 @@ int main (int argc, char* argv[])
 				//printf("Read for arg [-t]: %d\n", user_max_time);
 				break;
 			default:
+				printf("Unknown input read... Exiting...\n");
 				fail = true;
 				break;
 		} // end swtich(getopt)
 	} // end while(getopt)
 	
 	if (fail == true) return EXIT_FAILURE; // end program if a wrong option was selected
+
+	//Create file using path from last cmdln argument
+	FILE *datafile;
+	if ((datafile = fopen(argv[argc - 1], "r")) == NULL)
+	{
+		perror("Please ensure that the input file is the last argument");
+		return EXIT_FAILURE;
+	}
+	else
+	{
+		fclose(datafile);
+		data = argv[argc - 1];
+	}
 	
 	// if block checks to see if user decided on time/process count	
 	if (user_max_procs == -1) user_max_procs = DEF_MAX_PROCESSES;
@@ -170,7 +192,7 @@ int main (int argc, char* argv[])
 	
 	if ((slave_group_id = shmget(slave_group_key, sizeof(pid_t), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
         {
-                perror("ERROR: Shmget failed to allocated memory for slave group\n");
+           			perror("ERROR: Shmget failed to allocated memory for slave group\n");
                 exit(1);
         }
         else
@@ -186,8 +208,8 @@ int main (int argc, char* argv[])
         else
         {
                 slave_count = (int *)shmat(slave_count_id, NULL, 0);
-        	*slave_count = user_max_procs;
-	}
+        				*slave_count = user_max_procs;
+				}
 	
 	// filename is assumed to be < 25 characters in length
 	if ((filename_id = shmget(filename_key, sizeof(char) * 26, IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
@@ -198,7 +220,7 @@ int main (int argc, char* argv[])
         else
         {
                 filename = (char *)shmat(filename_id, NULL, 0);
-		strcpy(filename, file_out);
+								strcpy(filename, file_out);
         }
 
 	if ((flags_id = shmget(flags_key, sizeof(int) * user_max_procs, IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
@@ -220,36 +242,39 @@ int main (int argc, char* argv[])
         {
                 turn = (int *)shmat(turn_id, NULL, 0);
         }
+	
+	if ((proc_num_id = shmget(proc_num_key, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
+        {
+                perror("ERROR: Shmget failed to allocated memory for shared processes count\n");
+                exit(1);
+        }
+        else
+        {
+                proc_num = (int *)shmat(proc_num_id, NULL, 0);
+								*proc_num = 1;
+        }
 
-	//start_time = time(0);
+	start_time = time(0);
 	alarm(user_max_time);
 
 	int count = 1;
 
-	while (count < DEF_MAX_PROCESSES)
+	while (*proc_num < user_max_procs)
 	{
-		spawn_slave(count); // spawn a slave with count id
-		++count; // increment count to keep track of process #
+		spawn_slave(*proc_num); // spawn a slave with count id
+		++(*proc_num); // increment count to keep track of process #
 	}
 	
-	/*shm_id = shmget(100, 2048, IPC_CREAT | IPC_EXCL | 0600);
-	if (shm_id == -1)
+	while ((time(0) - start_time < user_max_time) && (*proc_num != 0))
 	{
-		perror("shmget: ");
-		exit(1);
+		wait(NULL);
+		//if (*proc_num > 0) --(*proc_num); // was int curr_proc_count
+		printf("There are currently %d processes in the system...\n", *proc_num);
+		//spawn_slave(*proc_num);
 	}
-	printf("Shared memory allocated to %d\n", shm_id);
 
-	shmctl(shm_id, IPC_RMID, 0);
-	printf("Shared memory deallocated: %d\n", shm_id);
-	*/
-	
-	if (fork() == 0)
-	{
-		execl("./slave", "slave", (char*)NULL);
-	}
-	
-	sleep(15);	
+	//sleep();	
+
 	deallocate();
 	
 	printf("We're back in main\n");
@@ -266,19 +291,38 @@ void print_usage()
 // TODO: SPAWN SLAVES!
 void spawn_slave(int count)
 {
-	if (curr_proc_count < user_max_procs)
+	if (*proc_num < user_max_procs)
 	{
 		spawn(count);
 	}
 	else
 	{
-		//do stuff
+		waitpid(-(*slave_group), &state, 0);
+		--(*proc_num); // was int curr_proc_count
+		printf("Waiting. There are currently %d processes in the system!\n", *proc_num);
+		spawn(count);
 	}
 }
 
 void spawn(int count)
 {
-
+	char id[10];
+	sprintf(id, "%d", count); 
+	//++(*proc_num);
+	printf("value of proc_num is: %d\n", *proc_num);
+	//++curr_proc_count;
+	if (fork() == 0)
+	{
+		printf("There are currently %d processes in the system!\n", *proc_num);
+		if (count == 1)
+		{
+			(*slave_group) = getpid(); // get group pid for the first only
+		}
+		setpgid(0, (*slave_group));
+		printf("We spawned a child!\n");
+		execl("./slave", "slave", id, NULL);
+		exit(0);
+	}
 }
 
 void deallocate()
@@ -287,19 +331,23 @@ void deallocate()
 	shmctl(shared_sum_id, IPC_RMID, NULL);
 	
 	shmdt(slave_group);
-        shmctl(slave_group_id, IPC_RMID, NULL);
+  shmctl(slave_group_id, IPC_RMID, NULL);
 
 	shmdt(flags);
-        shmctl(flags_id, IPC_RMID, NULL);
+  shmctl(flags_id, IPC_RMID, NULL);
 	
 	shmdt(turn);
-        shmctl(turn_id, IPC_RMID, NULL);
+  shmctl(turn_id, IPC_RMID, NULL);
 
-	shmdt(slave_count);
-        shmctl(slave_count_id, IPC_RMID, NULL);
+  shmdt(slave_count);
+  shmctl(slave_count_id, IPC_RMID, NULL);
 
 	shmdt(filename);
-        shmctl(filename_id, IPC_RMID, NULL);
+  shmctl(filename_id, IPC_RMID, NULL);
+
+	shmdt(proc_num);
+  shmctl(proc_num_id, IPC_RMID, NULL);
+	
 	printf("Succesfully deallocated memory for all shared variables\n");
 }
 
@@ -307,26 +355,24 @@ void c_sig_handler(int sig)
 {
 	int i = 0;
 	printf("\nReceived termination signal, exiting...\n");
-	killpg((*slave_group), SIGKILL);
-	/*for (; i < active_procs; i++)
+	killpg((*slave_group), SIGTERM);
+	for (; i < active_procs; i++)
 	{
 		wait(NULL);
-	}*/
-	//deallocate();
-	exit(0);		
+	}
+	printf("Exiting Process\n");
+	//deallocate();	
 }
 
 void timeout(int sig)
 {
 	int i = 0;	
 	printf("We're out of time, folks...\n");
-	killpg((*slave_group), SIGKILL);
-	/*for (; i < active_procs; i++)
+	killpg((*slave_group), SIGTERM);
+	for (; i < active_procs; i++)
 	{
 		wait(NULL);
-	}*/
+	}
 	//deallocate();
-	//printf("Exiting Process\n");
-	exit(0);		
-	
+	printf("Exiting Process\n");	
 }

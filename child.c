@@ -12,43 +12,78 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <signal.h>
 
-int main (int argc,char* argv[])
+/*Constant Variables*/
+
+#define TIME_SIZE 50 
+
+/*Prototypes */
+void get_time();
+void c_sig_handler(int sig);
+
+/*Global Variabls */
+char curr_time[TIME_SIZE];
+enum state {idle, want_in, in_cs};
+int id;
+
+int main (int argc, char* argv[])
 {
+	//setvbuf(stdout, NULL, _IONBF, 0); // for deebugging purposes
+	signal(SIGTERM, c_sig_handler);
+	signal(SIGINT, c_sig_handler);
+
+	/*if (argc < 3)
+	{
+		printf("Child lacks necessary number of arguments... Exiting...\n");
+		return EXIT_FAILURE;
+	}
+	*/
+	id = atoi(argv[1]);
+		
+	//id = argv[1];
+	//printf("%d\n", id);
+
 	int PROCS; // variable will hold number of processes that can execute at a time
 
 	/*Shared Memory Variables */
 
-        //Shared memory vars for the sum, which will be calculated
-        int shared_sum_key = ftok("makefile", 1);
-        int shared_sum_id;
-        int *shared_sum;
+  //Shared memory vars for the sum, which will be calculated
+  int shared_sum_key = ftok("makefile", 1);
+  int shared_sum_id;
+  int *shared_sum;
+       
+  //Shared memory vars for the slave group
+  int slave_group_key = ftok("makefile", 2);
+  int slave_group_id;
+  int *slave_group;
+       
+	//Shared memory vars for slave number count
+  int slave_count_key = ftok("makefile", 3);
+  int slave_count_id;
+  int *slave_count;
         
-        //Shared memory vars for the slave group
-        int slave_group_key = ftok("makefile", 2);
-        int slave_group_id;
-        int *slave_group;
-        
-        //Shared memory vars for slave number count
-        int slave_count_key = ftok("makefile", 3);
-        int slave_count_id;
-        int *slave_count;
-        
-        //Shared memory vars for the output file's name/path
-        int filename_key = ftok("makefile", 4);
-        int filename_id;
-        char* filename;
-        FILE *file;
+  //Shared memory vars for the output file's name/path
+  int filename_key = ftok("makefile", 4);
+  int filename_id;
+  char* filename;
+  FILE *file;
 
-        //Shared memory vars for flags
-        int flags_key = ftok("makefile", 5);
-        int flags_id;
-        int *flags;
+  //Shared memory vars for flags
+  int flags_key = ftok("makefile", 5);
+  int flags_id;
+  int *flags;
         
-        //Shared memory vars for turn token
-        int turn_key = ftok("makefile", 6);
-        int turn_id;
-        int *turn;	
+  //Shared memory vars for turn token
+  int turn_key = ftok("makefile", 6);
+	int turn_id;
+  int *turn;	
+	
+	//Shared memory vars for process counter
+	int proc_num_key = ftok("makefile", 7);
+	int proc_num_id;
+	int *proc_num;
 
 	if ((shared_sum_id = shmget(shared_sum_key, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
         {
@@ -112,12 +147,77 @@ int main (int argc,char* argv[])
         {
                 turn = (int *)shmat(turn_id, NULL, 0);
         }
+	
+	if ((proc_num_id = shmget(proc_num_key, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
+        {
+                perror("ERROR: Shmget failed to allocated memory for shared processes count\n");
+                exit(1);
+        }
+        else
+        {
+                proc_num = (int *)shmat(proc_num_id, NULL, 0);
+        }
+	//int id = rand() % PROCS;
+	int i;
+	do
+	{
+		flags[id - 1] = want_in;
+		i = *turn;
+
+		while (i != id - 1)
+		{
+			i = (flags[i] != idle) ? *turn : (i + 1) % PROCS;
+		}
+
+		flags[id - 1] = in_cs;
+		for (i = 0; i < PROCS; i++)
+		{
+			if ((i != (id - 1) && (flags[i] == in_cs))) break;
+		}
+
+	} while ( (i < PROCS) || ((*turn != id - 1) && (flags[*turn] != idle)) );
+	*turn = id - 1;
+	
+	sleep(rand() % 3);
 
 	++(*shared_sum);
-
+	fprintf(file, "HELLO!\n");
+	--(*proc_num);
 	printf("%d\n", *shared_sum);	
+	//get_time();
+	//printf("%s\n", curr_time);
+	sleep(rand() % 3);
 	
-	printf("I am a child\n");
-	sleep(5);
+	i = (*turn + 1) % PROCS;
+	while (flags[i] == idle)
+	{
+		i = (i + 1) % PROCS;
+	}
+
+	*turn = i;
+
+	flags[id - 1] = idle;
+	//kill(getppid(), SIGKILL);
+	
+	fclose(file);
 	return EXIT_SUCCESS;
+}
+
+void get_time()
+{
+	time_t curr; // current time variable
+	struct tm *loc_time; // time struct for local time
+
+	curr = time(NULL);
+
+	loc_time = localtime(&curr);
+
+	strftime (curr_time, TIME_SIZE, "%H:%M:%S\n", loc_time); 	
+	//fputs(curr_time, stdout);
+}
+
+void c_sig_handler(int sig)
+{
+  printf("\nChild: Received termination signal, exiting...\n");
+	exit(1);
 }

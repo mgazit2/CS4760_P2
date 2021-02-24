@@ -27,4 +27,4 @@ $(SLVE): $(SOBJ)
 	 $(CC) $(CFLAGS) -c $<
 
 clean:
-	 /bin/rm -rf *.o *.out $(MSTR) $(SLVE)
+	 /bin/rm -rf *.o output $(MSTR) $(SLVE)
