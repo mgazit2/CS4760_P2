@@ -22,6 +22,7 @@
 /*Constant Definitions */
 #define DEF_MAX_PROCESSES 20
 #define DEF_MAX_TIME 100
+#define MAX 100
 
 /*Prototypes */
 void print_usage();
@@ -43,6 +44,7 @@ int active_procs = 0; // number of processes currently running
 int user_max_procs;
 int user_max_time;
 char* data;
+enum state {vacant, idle, want_in, in_cs};
 
 /*Shared Memory Variables */
 int shared_sum_key;
@@ -72,6 +74,10 @@ int *turn;
 int proc_num_key;
 int proc_num_id;
 int *proc_num;
+
+int shared_arr_key;
+int shared_arr_id;
+int *shared_arr;
 
 int main (int argc, char* argv[])
 {
@@ -104,14 +110,17 @@ int main (int argc, char* argv[])
 	
 	//Shared memory for number of processes in system
 	proc_num_key = ftok("makefile", 7);
-	
+
+	//Shared memory for array of integers to add
+	shared_arr_key = ftok("makefile", 8);
+
 	user_max_procs = -1;
 	user_max_time = -1;
 	//int shm_id; // stores shared memory ID
 	
 	bool fail = false;
 	
-	setvbuf(stdout, NULL, _IONBF, 0); // for deebugging purposes
+	setvbuf(stdout, NULL, _IONBF, 0); // for debugging purposes
 	_program_name = argv[0];
 	snprintf(_error_str, sizeof _error_str, "%s: Error", _program_name); // for perror
 
@@ -147,9 +156,9 @@ int main (int argc, char* argv[])
 				user_max_time = atoi(optarg);
 				if (user_max_time > DEF_MAX_TIME)
                                 {
-                                        printf("No longer than %d seconds allowed!\n", DEF_MAX_TIME);
-                                        printf("Setting allowed processes to default value: %d (seconds)\n", DEF_MAX_TIME);
-                                        user_max_procs = DEF_MAX_TIME;
+                                  printf("No longer than %d seconds allowed!\n", DEF_MAX_TIME);
+                                  printf("Setting allowed processes to default value: %d (seconds)\n", DEF_MAX_TIME);
+                                  user_max_procs = DEF_MAX_TIME;
                                 }
 				//printf("Read for arg [-t]: %d\n", user_max_time);
 				break;
@@ -162,6 +171,16 @@ int main (int argc, char* argv[])
 	
 	if (fail == true) return EXIT_FAILURE; // end program if a wrong option was selected
 
+	if ((shared_arr_id = shmget(shared_arr_key, sizeof(int) * MAX, IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
+  {
+	  perror("ERROR: Shmget failed to allocated memory for shared integer array\n");
+	  exit(1);
+	}
+	else
+	{
+	  shared_arr = (int *)shmat(shared_arr_id, NULL, 0);
+	}
+
 	//Create file using path from last cmdln argument
 	FILE *datafile;
 	if ((datafile = fopen(argv[argc - 1], "r")) == NULL)
@@ -171,6 +190,14 @@ int main (int argc, char* argv[])
 	}
 	else
 	{
+		// Read contents of data file and add contents to a shared memory array of ints
+		// Will stop reading in data and move on if it encounters a non decimal input in shared_arr
+		int n_ints = 0;
+		while(n_ints < MAX && fscanf(datafile, "%d", &shared_arr[n_ints]) == 1) 
+		{ 
+			//printf("%d\n", shared_arr[n_ints]);
+			++n_ints;
+		}
 		fclose(datafile);
 		data = argv[argc - 1];
 	}
@@ -191,68 +218,68 @@ int main (int argc, char* argv[])
 	}
 	
 	if ((slave_group_id = shmget(slave_group_key, sizeof(pid_t), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
-        {
-           			perror("ERROR: Shmget failed to allocated memory for slave group\n");
-                exit(1);
-        }
-        else
-        {
-                slave_group = (pid_t *)shmat(slave_group_id, NULL, 0);
-        }
+  {
+    perror("ERROR: Shmget failed to allocated memory for slave group\n");
+    exit(1);
+  }
+	else
+  {
+    slave_group = (pid_t *)shmat(slave_group_id, NULL, 0);
+  }
 
 	if ((slave_count_id = shmget(slave_count_key, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
-        {
-                perror("ERROR: Shmget failed to allocated memory for slave counter\n");
-                exit(1);
-        }
-        else
-        {
-                slave_count = (int *)shmat(slave_count_id, NULL, 0);
-        				*slave_count = user_max_procs;
-				}
+  {
+    perror("ERROR: Shmget failed to allocated memory for slave counter\n");
+    exit(1);
+	}
+  else
+  {
+    slave_count = (int *)shmat(slave_count_id, NULL, 0);
+    *slave_count = user_max_procs;
+	}
 	
 	// filename is assumed to be < 25 characters in length
 	if ((filename_id = shmget(filename_key, sizeof(char) * 26, IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
-        {
-                perror("ERROR: Shmget failed to allocated memory for shared filename\n");
-                exit(1);
-        }
-        else
-        {
-                filename = (char *)shmat(filename_id, NULL, 0);
-								strcpy(filename, file_out);
-        }
+  {
+    perror("ERROR: Shmget failed to allocated memory for shared filename\n");
+    exit(1);
+  }
+  else
+  {
+    filename = (char *)shmat(filename_id, NULL, 0);
+    strcpy(filename, file_out);
+  }
 
 	if ((flags_id = shmget(flags_key, sizeof(int) * user_max_procs, IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
-        {
-                perror("ERROR: Shmget failed to allocated memory for flags array\n");
-                exit(1);
-        }
-        else
-        {
-                flags = (int *)shmat(flags_id, NULL, 0);
-        }
+  {
+    perror("ERROR: Shmget failed to allocated memory for flags array\n");
+    exit(1);
+  }
+  else
+  {
+    flags = (int *)shmat(flags_id, NULL, 0);
+  }
 
 	if ((turn_id = shmget(turn_key, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
-        {
-                perror("ERROR: Shmget failed to allocated memory for shared turn array\n");
-                exit(1);
-        }
-        else
-        {
-                turn = (int *)shmat(turn_id, NULL, 0);
-        }
+  {
+    perror("ERROR: Shmget failed to allocated memory for shared turn array\n");
+    exit(1);
+  }
+  else
+  {
+    turn = (int *)shmat(turn_id, NULL, 0);
+  }
 	
 	if ((proc_num_id = shmget(proc_num_key, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
-        {
-                perror("ERROR: Shmget failed to allocated memory for shared processes count\n");
-                exit(1);
-        }
-        else
-        {
-                proc_num = (int *)shmat(proc_num_id, NULL, 0);
-								*proc_num = 1;
-        }
+  {
+    perror("ERROR: Shmget failed to allocated memory for shared processes count\n");
+    exit(1);
+  }
+  else
+  {
+    proc_num = (int *)shmat(proc_num_id, NULL, 0);
+		*proc_num = 1;
+  }
 
 	start_time = time(0);
 	alarm(user_max_time);
@@ -265,11 +292,19 @@ int main (int argc, char* argv[])
 		++(*proc_num); // increment count to keep track of process #
 	}
 	
-	while ((time(0) - start_time < user_max_time) && (*proc_num != 0))
+	while ((time(0) - start_time < user_max_time) && (*proc_num > 0))
 	{
 		wait(NULL);
+		if (*proc_num < user_max_procs && *proc_num != 0)
+		{
+			//--(*proc_num);
+			int new_spawn_id = 1;
+			while (flags[new_spawn_id - 1] != vacant) { ++new_spawn_id; }
+			flags[new_spawn_id - 1] = idle;
+			spawn_slave(new_spawn_id);
+		}
 		//if (*proc_num > 0) --(*proc_num); // was int curr_proc_count
-		printf("There are currently %d processes in the system...\n", *proc_num);
+		//printf("There are currently %d processes in the system...\n", *proc_num);
 		//spawn_slave(*proc_num);
 	}
 
@@ -308,7 +343,7 @@ void spawn(int count)
 {
 	char id[10];
 	sprintf(id, "%d", count); 
-	//++(*proc_num);
+	++(*proc_num);
 	printf("value of proc_num is: %d\n", *proc_num);
 	//++curr_proc_count;
 	if (fork() == 0)
@@ -321,6 +356,7 @@ void spawn(int count)
 		setpgid(0, (*slave_group));
 		printf("We spawned a child!\n");
 		execl("./slave", "slave", id, NULL);
+		//++(*proc_num);
 		exit(0);
 	}
 }
@@ -348,6 +384,9 @@ void deallocate()
 	shmdt(proc_num);
   shmctl(proc_num_id, IPC_RMID, NULL);
 	
+	shmdt(shared_arr);
+	shmctl(shared_arr_id, IPC_RMID, NULL);
+
 	printf("Succesfully deallocated memory for all shared variables\n");
 }
 
@@ -356,12 +395,13 @@ void c_sig_handler(int sig)
 	int i = 0;
 	printf("\nReceived termination signal, exiting...\n");
 	killpg((*slave_group), SIGTERM);
-	for (; i < active_procs; i++)
+	for (; i < user_max_procs; i++)
 	{
 		wait(NULL);
 	}
 	printf("Exiting Process\n");
-	//deallocate();	
+	deallocate();	
+	exit(1);
 }
 
 void timeout(int sig)
@@ -369,10 +409,12 @@ void timeout(int sig)
 	int i = 0;	
 	printf("We're out of time, folks...\n");
 	killpg((*slave_group), SIGTERM);
-	for (; i < active_procs; i++)
+	for (; i < user_max_procs; i++)
 	{
 		wait(NULL);
 	}
 	//deallocate();
-	printf("Exiting Process\n");	
+	printf("Exiting Process\n");
+	deallocate();
+	exit(1);
 }

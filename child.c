@@ -14,10 +14,14 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <sys/types.h>
 
 /*Constant Variables*/
 
 #define TIME_SIZE 50 
+#define MAX 100
 
 /*Prototypes */
 void get_time();
@@ -25,7 +29,7 @@ void c_sig_handler(int sig);
 
 /*Global Variabls */
 char curr_time[TIME_SIZE];
-enum state {idle, want_in, in_cs};
+enum state {vacant, idle, want_in, in_cs};
 int id;
 
 int main (int argc, char* argv[])
@@ -85,78 +89,93 @@ int main (int argc, char* argv[])
 	int proc_num_id;
 	int *proc_num;
 
+	//Shared memory vars for shared array of ints
+	int shared_arr_key = ftok("makefile", 8);
+	int shared_arr_id;
+	int *shared_arr;
+
+	if ((shared_arr_id = shmget(shared_arr_key, sizeof(int) * MAX, IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
+	{
+		perror("ERROR: Shmget failed to allocatee memory for shared array of integers\n");
+		exit(1);
+	}
+	else
+	{
+		shared_arr = (int *)shmat(shared_arr_id, NULL, 0);
+	}
+
 	if ((shared_sum_id = shmget(shared_sum_key, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
-        {
-                perror("ERROR: Shmget failed to allocated memory for shared sum\n");
-                exit(1);
-        }
-        else
-        {
-                shared_sum = (int *)shmat(shared_sum_id, NULL, 0);
-                (*shared_sum) = 0;
-        }
+  {
+    perror("ERROR: Shmget failed to allocated memory for shared sum\n");
+    exit(1);
+  }
+  else
+  {
+    shared_sum = (int *)shmat(shared_sum_id, NULL, 0);
+    (*shared_sum) = 0;
+  }
 
-        if ((slave_group_id = shmget(slave_group_key, sizeof(pid_t), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
-        {
-                perror("ERROR: Shmget failed to allocated memory for slave group\n");
-                exit(1);
-        }
-        else
-        {
-                slave_group = (pid_t *)shmat(slave_group_id, NULL, 0);
-        }
+  if ((slave_group_id = shmget(slave_group_key, sizeof(pid_t), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
+  {
+    perror("ERROR: Shmget failed to allocated memory for slave group\n");
+    exit(1);
+  }
+  else
+  {
+    slave_group = (pid_t *)shmat(slave_group_id, NULL, 0);
+  }
 
-        if ((slave_count_id = shmget(slave_count_key, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
-        {
-                perror("ERROR: Shmget failed to allocated memory for slave counter\n");
-                exit(1);
-        }
-        else
-        {
-                slave_count = (int *)shmat(slave_count_id, NULL, 0);
-                PROCS = *slave_count;
-        }
+  if ((slave_count_id = shmget(slave_count_key, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
+  {
+    perror("ERROR: Shmget failed to allocated memory for slave counter\n");
+    exit(1);
+  }
+  else
+  {
+    slave_count = (int *)shmat(slave_count_id, NULL, 0);
+    PROCS = *slave_count;
+  }
 	
 	if ((filename_id = shmget(filename_key, sizeof(char) * 26, IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
-        {
-                perror("ERROR: Shmget failed to allocated memory for shared filename\n");
-                exit(1);
-        }
-        else
-        {
-                filename = (char *)shmat(filename_id, NULL, 0);
-                file = fopen(filename, "a");
-        }
+  {
+    perror("ERROR: Shmget failed to allocated memory for shared filename\n");
+    exit(1);
+  }
+  else
+  {
+    filename = (char *)shmat(filename_id, NULL, 0);
+    file = fopen(filename, "a");
+  }
 
-        if ((flags_id = shmget(flags_key, sizeof(int) * PROCS, IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
-        {
-                perror("ERROR: Shmget failed to allocated memory for flags array\n");
-                exit(1);
-        }
-        else
-        {
-                flags = (int *)shmat(flags_id, NULL, 0);
-        }
+  if ((flags_id = shmget(flags_key, sizeof(int) * PROCS, IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
+  {
+    perror("ERROR: Shmget failed to allocated memory for flags array\n");
+    exit(1);
+  }
+  else
+  {
+    flags = (int *)shmat(flags_id, NULL, 0);
+  }
 
-        if ((turn_id = shmget(turn_key, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
-        {
-                perror("ERROR: Shmget failed to allocated memory for shared turn array\n");
-                exit(1);
-        }
-        else
-        {
+  if ((turn_id = shmget(turn_key, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
+  {
+    perror("ERROR: Shmget failed to allocated memory for shared turn array\n");
+    exit(1);
+  }
+  else
+  {
                 turn = (int *)shmat(turn_id, NULL, 0);
-        }
+  }
 	
 	if ((proc_num_id = shmget(proc_num_key, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
-        {
-                perror("ERROR: Shmget failed to allocated memory for shared processes count\n");
-                exit(1);
-        }
-        else
-        {
-                proc_num = (int *)shmat(proc_num_id, NULL, 0);
-        }
+  {
+     perror("ERROR: Shmget failed to allocated memory for shared processes count\n");
+    exit(1);
+  }
+  else
+  {
+    proc_num = (int *)shmat(proc_num_id, NULL, 0);
+  }
 	//int id = rand() % PROCS;
 	int i;
 	do
@@ -166,7 +185,7 @@ int main (int argc, char* argv[])
 
 		while (i != id - 1)
 		{
-			i = (flags[i] != idle) ? *turn : (i + 1) % PROCS;
+			i = (flags[i] != idle || flags[i] != vacant) ? *turn : (i + 1) % PROCS;
 		}
 
 		flags[id - 1] = in_cs;
@@ -175,28 +194,28 @@ int main (int argc, char* argv[])
 			if ((i != (id - 1) && (flags[i] == in_cs))) break;
 		}
 
-	} while ( (i < PROCS) || ((*turn != id - 1) && (flags[*turn] != idle)) );
+	} while ( (i < PROCS) || ((*turn != id - 1) && (flags[*turn] != idle || flags[*turn] != vacant)) );
 	*turn = id - 1;
-	
+
+	/*CRITICAL SECTION */	
 	sleep(rand() % 3);
 
-	++(*shared_sum);
-	fprintf(file, "HELLO!\n");
+	get_time();
+	int pid = getpid();
+
+	fprintf(file, "\n%s | %d | %d | %d\n", curr_time, pid, id, 0);
 	--(*proc_num);
-	printf("%d\n", *shared_sum);	
-	//get_time();
-	//printf("%s\n", curr_time);
+
 	sleep(rand() % 3);
 	
 	i = (*turn + 1) % PROCS;
-	while (flags[i] == idle)
+	while (flags[i] == idle || flags[i] == vacant)
 	{
 		i = (i + 1) % PROCS;
 	}
-
 	*turn = i;
 
-	flags[id - 1] = idle;
+	flags[id - 1] = vacant;
 	//kill(getppid(), SIGKILL);
 	
 	fclose(file);
