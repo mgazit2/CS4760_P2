@@ -94,6 +94,16 @@ int main (int argc, char* argv[])
 	int shared_arr_id;
 	int *shared_arr;
 
+	//Shared memory vars for partition a
+	int part_a_key = ftok("makefile", 9);
+	int part_a_id;
+	int *part_a;
+
+	//Shared memory vars for partition b
+	int part_b_key = ftok("makefile", 10);
+	int part_b_id;
+	int *part_b;
+	
 	if ((shared_arr_id = shmget(shared_arr_key, sizeof(int) * MAX, IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
 	{
 		perror("ERROR: Shmget failed to allocatee memory for shared array of integers\n");
@@ -104,6 +114,26 @@ int main (int argc, char* argv[])
 		shared_arr = (int *)shmat(shared_arr_id, NULL, 0);
 	}
 
+	if ((part_a_id = shmget(part_a_key, sizeof(int) * (MAX / 2), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
+	{
+		perror("CHILD: ERROR: Shmget failed to allocate memory for partition a array\n");
+		exit(1);
+	}
+	else
+	{
+		part_a = (int *)shmat(part_a_id, NULL, 0);
+	}
+
+	if ((part_b_id = shmget(part_b_key, sizeof(int) * (MAX / 2), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
+	{
+		perror("CHILD: ERROR: Shmget failed to allocate shared memory for partition b array\n");
+		exit(1);
+	}
+	else
+	{
+		part_b = (int *)shmat(part_b_id, NULL, 0);
+	}
+
 	if ((shared_sum_id = shmget(shared_sum_key, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
   {
     perror("ERROR: Shmget failed to allocated memory for shared sum\n");
@@ -112,7 +142,7 @@ int main (int argc, char* argv[])
   else
   {
     shared_sum = (int *)shmat(shared_sum_id, NULL, 0);
-    (*shared_sum) = 0;
+    //(*shared_sum) = 0;
   }
 
   if ((slave_group_id = shmget(slave_group_key, sizeof(pid_t), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
@@ -164,12 +194,12 @@ int main (int argc, char* argv[])
   }
   else
   {
-                turn = (int *)shmat(turn_id, NULL, 0);
+    turn = (int *)shmat(turn_id, NULL, 0);
   }
 	
 	if ((proc_num_id = shmget(proc_num_key, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
   {
-     perror("ERROR: Shmget failed to allocated memory for shared processes count\n");
+    perror("ERROR: Shmget failed to allocated memory for shared processes count\n");
     exit(1);
   }
   else
@@ -177,6 +207,9 @@ int main (int argc, char* argv[])
     proc_num = (int *)shmat(proc_num_id, NULL, 0);
   }
 	//int id = rand() % PROCS;
+	
+	/* PETERSON'S FLAGS ALGORITHM IMPLEMENTATION */
+
 	int i;
 	do
 	{
@@ -198,14 +231,76 @@ int main (int argc, char* argv[])
 	*turn = id - 1;
 
 	/*CRITICAL SECTION */	
-	sleep(rand() % 3);
+
+	sleep(rand() % 3); // SEE README FOR NOTES ON WHY WE SLEEP FOR THIS LENGTH
 
 	get_time();
+	
 	int pid = getpid();
+	int part_size = sizeof(part_a) / sizeof(part_a[0]);
+	int k; // another iterator
 
-	fprintf(file, "\n%s | %d | %d | %d\n", curr_time, pid, id, 0);
+	for (k = 0; k < part_size; k++)
+	{
+		if ((part_a[k] != 0 || part_b[k] != 0) && shared_arr[k] == 0) continue;
+		else
+		{
+			printf("I'm creating new partitions\n");
+
+			shmdt(part_a);
+			shmctl(part_a_id, IPC_RMID, NULL);
+
+			shmdt(part_b);
+			shmctl(part_b_id, IPC_RMID, NULL);
+
+			if ((part_a_id = shmget(part_a_key, sizeof(int) * (MAX / 2), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
+			{
+				perror("CHILD : ERROR : Shmget failed to create a partition\n");
+				flags[*turn] = vacant;
+				--(*proc_num);
+				exit(1);
+			}
+			else
+			{
+				part_a = (int *)shmat(part_a_id, NULL, 0);
+			}
+
+			if ((part_b_id = shmget(part_b_key, sizeof(int) * (MAX / 2), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
+			{
+				perror("CHILD : ERROR : Shmget failed to create a partition\n");
+				flags[*turn] = vacant;
+				--(*proc_num);
+				exit(1);
+			}
+			else
+			{
+				part_b = (int *)shmat(part_b_id, NULL, 0);
+			}
+
+			memcpy(part_a, shared_arr, (MAX / 2) * sizeof(int));
+			memcpy(part_b, shared_arr + (MAX / 2), (MAX / 2) * sizeof(int));
+			// create new partition
+		}
+	}
+
+	//fprintf(file, "\n%s | %d | %d | %d\n", curr_time, pid, id, 0);
+
+	if (part_a[*turn] == 0 && part_b[*turn] == 0)
+	{
+		// DO NOTHING
+	}
+	else
+	{
+		shared_arr[*turn] = part_a[*turn] + part_b[*turn];
+		perror("CHILD: Added 2 numbers succesfully");
+		part_a[*turn] = 0;
+		part_b[*turn] = 0;
+	}
+
+	fprintf(file, "\n%s | %d | %d | %d\n", curr_time, pid, id, shared_arr[*turn]);
+
 	--(*proc_num);
-
+	
 	sleep(rand() % 3);
 	
 	i = (*turn + 1) % PROCS;

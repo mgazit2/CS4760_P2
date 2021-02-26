@@ -49,15 +49,15 @@ enum state {vacant, idle, want_in, in_cs};
 /*Shared Memory Variables */
 int shared_sum_key;
 int shared_sum_id;
-int *shared_sum;
+int* shared_sum;
 
 int slave_group_key;
 int slave_group_id;
-pid_t *slave_group;
+pid_t* slave_group;
 
 int slave_count_key;
 int slave_count_id;
-int *slave_count;
+int* slave_count;
 
 int filename_key;
 int filename_id;
@@ -65,19 +65,27 @@ char* filename;
 
 int flags_key;
 int flags_id;
-int *flags;
+int* flags;
 
 int turn_key;
 int turn_id;
-int *turn;
+int* turn;
 
 int proc_num_key;
 int proc_num_id;
-int *proc_num;
+int* proc_num;
 
 int shared_arr_key;
 int shared_arr_id;
-int *shared_arr;
+int* shared_arr;
+
+int part_a_key;
+int part_a_id;
+int* part_a;
+
+int part_b_key;
+int part_b_id;
+int* part_b;
 
 int main (int argc, char* argv[])
 {
@@ -113,6 +121,12 @@ int main (int argc, char* argv[])
 
 	//Shared memory for array of integers to add
 	shared_arr_key = ftok("makefile", 8);
+
+	//SHared memory for partition A
+	part_a_key = ftok("makefile", 9);
+
+	//Shared memory for partition B
+	part_b_key = ftok("makefile", 10);
 
 	user_max_procs = -1;
 	user_max_time = -1;
@@ -181,6 +195,27 @@ int main (int argc, char* argv[])
 	  shared_arr = (int *)shmat(shared_arr_id, NULL, 0);
 	}
 
+	if ((part_a_id = shmget(part_a_key, sizeof(int) * (MAX / 2), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
+	{
+		perror(_error_str);
+		exit(1);
+	}
+	else
+	{
+		part_a = (int *)shmat(part_a_id, NULL, 0);
+		//memcpy(part_a, shared_arr, (MAX / 2) * sizeof(int));
+	}
+
+	if ((part_b_id = shmget(part_b_key, sizeof(int) * (MAX / 2), IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
+	{
+		perror(_error_str);
+		exit(1);
+	}
+	else
+	{
+		part_b = (int *)shmat(part_b_id, NULL, 0);
+	}
+
 	//Create file using path from last cmdln argument
 	FILE *datafile;
 	if ((datafile = fopen(argv[argc - 1], "r")) == NULL)
@@ -198,6 +233,15 @@ int main (int argc, char* argv[])
 			//printf("%d\n", shared_arr[n_ints]);
 			++n_ints;
 		}
+		
+		memcpy(part_a, shared_arr, (MAX / 2) * sizeof(int));
+		int b = 0;
+		for (; b < (MAX / 2); b++) printf("%d\n", part_a[b]);
+		memcpy(part_b, shared_arr + (MAX / 2), (MAX / 2) * sizeof(int));
+
+		b = 0;
+		for (; b < MAX; b++) shared_arr[b] = 0;
+		
 		fclose(datafile);
 		data = argv[argc - 1];
 	}
@@ -286,10 +330,12 @@ int main (int argc, char* argv[])
 
 	int count = 1;
 
-	while (*proc_num < user_max_procs)
+
+	//Initial loop for creating processes
+	while (*proc_num < user_max_procs - 1) // prevents spawning too many children on program startup
 	{
 		spawn_slave(*proc_num); // spawn a slave with count id
-		++(*proc_num); // increment count to keep track of process #
+		//++(*proc_num); // increment count to keep track of process #
 	}
 	
 	while ((time(0) - start_time < user_max_time) && (*proc_num > 0))
@@ -297,22 +343,18 @@ int main (int argc, char* argv[])
 		wait(NULL);
 		if (*proc_num < user_max_procs && *proc_num != 0)
 		{
-			//--(*proc_num);
-			int new_spawn_id = 1;
-			while (flags[new_spawn_id - 1] != vacant) { ++new_spawn_id; }
+			int new_spawn_id = *proc_num;
+			while (flags[new_spawn_id - 1] != vacant) 
+			{ 
+				if (new_spawn_id >= user_max_procs) new_spawn_id = 0;
+				++new_spawn_id; 
+			}
 			flags[new_spawn_id - 1] = idle;
 			spawn_slave(new_spawn_id);
 		}
-		//if (*proc_num > 0) --(*proc_num); // was int curr_proc_count
-		//printf("There are currently %d processes in the system...\n", *proc_num);
-		//spawn_slave(*proc_num);
 	}
 
-	//sleep();	
-
 	deallocate();
-	
-	printf("We're back in main\n");
 	return EXIT_SUCCESS;
 }
 
@@ -322,8 +364,6 @@ void print_usage()
 	printf("master [-h] [-s i] [-t time] datafile\n");
 }
 
-
-// TODO: SPAWN SLAVES!
 void spawn_slave(int count)
 {
 	if (*proc_num < user_max_procs)
@@ -345,7 +385,6 @@ void spawn(int count)
 	sprintf(id, "%d", count); 
 	++(*proc_num);
 	printf("value of proc_num is: %d\n", *proc_num);
-	//++curr_proc_count;
 	if (fork() == 0)
 	{
 		printf("There are currently %d processes in the system!\n", *proc_num);
@@ -356,7 +395,6 @@ void spawn(int count)
 		setpgid(0, (*slave_group));
 		printf("We spawned a child!\n");
 		execl("./slave", "slave", id, NULL);
-		//++(*proc_num);
 		exit(0);
 	}
 }
@@ -387,11 +425,18 @@ void deallocate()
 	shmdt(shared_arr);
 	shmctl(shared_arr_id, IPC_RMID, NULL);
 
+	shmdt(part_a);
+	shmctl(part_a_id, IPC_RMID, NULL);
+
+	shmdt(part_b);
+	shmctl(part_b_id, IPC_RMID, NULL);
+	
 	printf("Succesfully deallocated memory for all shared variables\n");
 }
 
 void c_sig_handler(int sig)
 {
+	perror(_error_str);
 	int i = 0;
 	printf("\nReceived termination signal, exiting...\n");
 	killpg((*slave_group), SIGTERM);
@@ -406,6 +451,7 @@ void c_sig_handler(int sig)
 
 void timeout(int sig)
 {
+	perror(_error_str);
 	int i = 0;	
 	printf("We're out of time, folks...\n");
 	killpg((*slave_group), SIGTERM);
