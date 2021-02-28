@@ -16,6 +16,7 @@ Make:
 	To clean up the project directory between execution, use "make clean" in the cmd line
 
 ISSUES:
+	NOTE: The program does not exit normally, but rather relies on one of the signals to end accordingly...
 
 	Signal issues: I believe my parent is part of the group of processes that is being terminated when a termination signal is sent to *slave_group. All processes are thus killed
 			at termination time because of this, but it is not incrementaly. I was not able to figure out how to clean up this issue at the time I am writing this. Will add
@@ -30,3 +31,6 @@ ISSUES:
 		shared memory.
 	
 	sleep(rand() % 3) issue: having the children sleep for any time less than this led to errors in the allocation of the flag shared memory segment
+
+	I strongly believe that the reason for which this is not working is because I was not allocating to a variable memory size, but rather using a constant... I realized this
+		too late, and it was plain in the project outline...

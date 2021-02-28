@@ -394,7 +394,7 @@ void spawn(int count)
 		}
 		setpgid(0, (*slave_group));
 		printf("We spawned a child!\n");
-		execl("./slave", "slave", id, NULL);
+		execl("./bin_adder", "bin_adder", id, NULL);
 		exit(0);
 	}
 }

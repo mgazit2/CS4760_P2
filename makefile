@@ -8,7 +8,7 @@ MSTR = master
 MOBJ = main.o
 MOUT = $(MSTR)
 
-SLVE = slave
+SLVE = bin_adder
 SOBJ = child.o
 SOUT = $(SLVE)
 

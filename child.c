@@ -103,6 +103,8 @@ int main (int argc, char* argv[])
 	int part_b_key = ftok("makefile", 10);
 	int part_b_id;
 	int *part_b;
+
+	/*Attaching/allocating shared memory segments for the child */
 	
 	if ((shared_arr_id = shmget(shared_arr_key, sizeof(int) * MAX, IPC_CREAT | S_IRUSR | S_IWUSR)) < 0)
 	{
@@ -209,6 +211,7 @@ int main (int argc, char* argv[])
 	//int id = rand() % PROCS;
 	
 	/* PETERSON'S FLAGS ALGORITHM IMPLEMENTATION */
+	//See README.md for implementation source
 
 	int i;
 	do
@@ -234,10 +237,16 @@ int main (int argc, char* argv[])
 
 	sleep(rand() % 3); // SEE README FOR NOTES ON WHY WE SLEEP FOR THIS LENGTH
 
-	get_time();
+	get_time(); // sets time variable for the child
 	
 	int pid = getpid();
-	int part_size = sizeof(part_a) / sizeof(part_a[0]);
+	//int part_size = sizeof(part_a) / sizeof(part_a[0]);
+	int part_size = 1;
+	int counter = 0;
+	for (counter ; counter < (MAX / 2); counter++)
+	{
+		if (shared_arr[counter] != 0) part_size++;
+	}
 	int k; // another iterator
 
 	for (k = 0; k < part_size; k++)
