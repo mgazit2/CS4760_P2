@@ -94,7 +94,7 @@ int main (int argc, char* argv[])
 	
 	//int user_max_procs = 20;
 	_program_name = argv[0];
-	const char* file_out = "output"; // shared output file for the program
+	const char* file_out = "LOG_OUT"; // shared output file for the program
 
 	/*Shared Memory Variables */
 	
@@ -128,6 +128,7 @@ int main (int argc, char* argv[])
 	//Shared memory for partition B
 	part_b_key = ftok("makefile", 10);
 
+	// These are initialized to -1 for error checking once program enters getopt loop
 	user_max_procs = -1;
 	user_max_time = -1;
 	//int shm_id; // stores shared memory ID
@@ -169,12 +170,11 @@ int main (int argc, char* argv[])
 			case 't':
 				user_max_time = atoi(optarg);
 				if (user_max_time > DEF_MAX_TIME)
-                                {
-                                  printf("No longer than %d seconds allowed!\n", DEF_MAX_TIME);
-                                  printf("Setting allowed processes to default value: %d (seconds)\n", DEF_MAX_TIME);
-                                  user_max_procs = DEF_MAX_TIME;
-                                }
-				//printf("Read for arg [-t]: %d\n", user_max_time);
+        {
+          printf("No longer than %d seconds allowed!\n", DEF_MAX_TIME);
+          printf("Setting allowed processes to default value: %d (seconds)\n", DEF_MAX_TIME);
+          user_max_procs = DEF_MAX_TIME;
+        }
 				break;
 			default:
 				printf("Unknown input read... Exiting...\n");
@@ -236,7 +236,7 @@ int main (int argc, char* argv[])
 		
 		memcpy(part_a, shared_arr, (MAX / 2) * sizeof(int));
 		int b = 0;
-		for (; b < (MAX / 2); b++) printf("%d\n", part_a[b]);
+		//for (; b < (MAX / 2); b++) printf("%d\n", part_a[b]);
 		memcpy(part_b, shared_arr + (MAX / 2), (MAX / 2) * sizeof(int));
 
 		b = 0;
@@ -325,17 +325,16 @@ int main (int argc, char* argv[])
 		*proc_num = 1;
   }
 
-	start_time = time(0);
-	alarm(user_max_time);
+	start_time = time(0); //start our stopwatch for below while loop
+	alarm(user_max_time); //set alarm
 
 	int count = 1;
 
 
 	//Initial loop for creating processes
-	while (*proc_num < user_max_procs - 1) // prevents spawning too many children on program startup
+	while (*proc_num < user_max_procs - 1) // '-1' prevents spawning too many children on program startup
 	{
 		spawn_slave(*proc_num); // spawn a slave with count id
-		//++(*proc_num); // increment count to keep track of process #
 	}
 	
 	while ((time(0) - start_time < user_max_time) && (*proc_num > 0))
@@ -358,12 +357,15 @@ int main (int argc, char* argv[])
 	return EXIT_SUCCESS;
 }
 
+
+// Prints program usage
 void print_usage()
 {
 	printf("master [-h]\n");
 	printf("master [-h] [-s i] [-t time] datafile\n");
 }
 
+// Main spawn method, see references for logic source
 void spawn_slave(int count)
 {
 	if (*proc_num < user_max_procs)
@@ -379,6 +381,7 @@ void spawn_slave(int count)
 	}
 }
 
+// Encapsulated method for spawn readability
 void spawn(int count)
 {
 	char id[10];
@@ -399,6 +402,7 @@ void spawn(int count)
 	}
 }
 
+// Deallocates all shared memory segments at once
 void deallocate()
 {
 	shmdt(shared_sum);
@@ -434,6 +438,7 @@ void deallocate()
 	printf("Succesfully deallocated memory for all shared variables\n");
 }
 
+// Keyboard interrupt signal handler
 void c_sig_handler(int sig)
 {
 	perror(_error_str);
@@ -449,6 +454,7 @@ void c_sig_handler(int sig)
 	exit(1);
 }
 
+// Timeout signal handler using the built-in alarm
 void timeout(int sig)
 {
 	perror(_error_str);

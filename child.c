@@ -320,9 +320,9 @@ int main (int argc, char* argv[])
 	*turn = i;
 
 	flags[id - 1] = vacant;
-	//kill(getppid(), SIGKILL);
 	
 	fclose(file);
+	exit(0);
 	return EXIT_SUCCESS;
 }
 
